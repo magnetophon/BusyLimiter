@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+/BusyLimiter
+/BusyLimiter-svg/
+/faust-graphs.html

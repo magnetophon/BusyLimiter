@@ -1,0 +1,52 @@
+<!DOCTYPE patchbay>
+<patchbay version="0.6.2" name="BusyLimiter-SimpleScope">
+ <output-sockets>
+  <socket exclusive="off" type="jack-audio" client="BusyLimiter" name="BusyLimiter">
+   <plug>out_0</plug>
+   <plug>out_1</plug>
+   <plug>out_2</plug>
+   <plug>out_3</plug>
+  </socket>
+  <socket exclusive="off" type="jack-audio" client="Simple Scope \(4 channel\)" name="Simple Scope (4 channel)">
+   <plug>out1</plug>
+   <plug>out2</plug>
+   <plug>out3</plug>
+   <plug>out4</plug>
+  </socket>
+  <socket exclusive="off" type="jack-midi" client="a2j" name="a2j">
+   <plug>Midi Through \[14\] \(capture\): Midi Through Port-0</plug>
+  </socket>
+  <socket exclusive="off" type="alsa-midi" client="Midi Through" name="Midi Through">
+   <plug>Midi Through Port-0</plug>
+  </socket>
+ </output-sockets>
+ <input-sockets>
+  <socket exclusive="off" type="jack-audio" client="system" name="system">
+   <plug>playback_1</plug>
+   <plug>playback_2</plug>
+   <plug>playback_3</plug>
+   <plug>playback_4</plug>
+  </socket>
+  <socket exclusive="off" type="jack-audio" client="Simple Scope \(4 channel\)" name="Simple Scope (4 channel)">
+   <plug>in1</plug>
+   <plug>in2</plug>
+   <plug>in3</plug>
+   <plug>in4</plug>
+  </socket>
+  <socket exclusive="off" type="jack-midi" client="a2j" name="a2j">
+   <plug>Midi Through \[14\] \(playback\): Midi Through Port-0</plug>
+  </socket>
+  <socket exclusive="off" type="alsa-midi" client="Midi Through" name="Midi Through">
+   <plug>Midi Through Port-0</plug>
+  </socket>
+  <socket exclusive="off" type="alsa-midi" client="a2jmidid" name="a2jmidid">
+   <plug>port</plug>
+  </socket>
+ </input-sockets>
+ <slots/>
+ <cables>
+  <cable type="jack-audio" input="Simple Scope (4 channel)" output="BusyLimiter"/>
+  <cable type="alsa-midi" input="a2jmidid" output="Midi Through"/>
+ </cables>
+</patchbay>
+
