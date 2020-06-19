@@ -15,6 +15,18 @@ make release out of paralel lin releases, of pow(2,i) length, pick the one that 
 
 first do the release, so attack knows where to start from
 
+new attack idea
+when there is a new lower value, check the value of time and sustract it from the previously saved one.
+if use that to calculate the needed speed, and if it is higher, save the time in a rw_table of size totalLatency.
+also save the needed GR in a second table
+
+when time==LatencyCompensatedSavedVlue, SandH the time and speed, read then next value and ramp to the needed GR in the alotted time.
+
+
+to combat time running into maxInt, make it a ramp.
+to make sure we don't get confused at the wrap-around point:
+if timeDiff<0 add wrapValue to one end.
+
 
 */
 
@@ -22,9 +34,8 @@ first do the release, so attack knows where to start from
 //                                  process                                  //
 ///////////////////////////////////////////////////////////////////////////////
 
-
 process(x) =
-  testSignal@(totalLatency)
+testSignal@(totalLatency)
 , holdGR(testSignal)
 , preAttackGR(testSignal)@(1+totalLatency-(bottomAttackTime@totalLatency))
 , smoothGRl(testSignal)@(1+totalLatency-(maxAttackTime@totalLatency))
@@ -46,12 +57,12 @@ with {
 // fade(0)
   with {
   new(i) = lowestGRblock(GR,size(i))@(maxAttackTime-size(i));
-  newH(i) = new(i):ba.sAndH( reset(i)| (attPhase(prev)==0) );
-  prevH(i) = prev:ba.sAndH( reset(i)| (attPhase(prev)==0) );
+  newH(i) = new(i):ba.sAndH( reset(i)| select2(checkbox("att newH"),0,(attPhase(prev)==0)) );
+  prevH(i) = prev:ba.sAndH( reset(i)| select2(checkbox("att prevH"),0,(attPhase(prev)==0)) );
   reset(i) =
     (newDownSpeed(i) > currentDownSpeed);
   fade(i) =
-    crossfade(prevH(i),newH(i) ,ramp(size(i),reset(i)| (attPhase(prev)==0))) // TODO crossfade from current direction to new position
+    crossfade(prevH(i),newH(i) ,ramp(size(i),reset(i)| select2(checkbox("att ramp"),0,(attPhase(prev)==0)))) // TODO crossfade from current direction to new position
 // :min(GR@maxAttackTime)//brute force fade of 64 samples not needed for binary tree attack ?
 // sample and hold oldDownSpeed:
 // , (select2((newDownSpeed(i) > currentDownSpeed),currentDownSpeed ,newDownSpeed(i)))
@@ -94,10 +105,10 @@ maxAttackTime = pow(2,maxAttackExpo);
 maxAttackExpo =
   select2(blockDiagram
     // ,4 // == 16 samples,
-         ,7 // == 128 samples, 2.666 ms at 48k
-// ,8 // 256 samples, 5.333 ms at 48k, the max lookahead of fabfilter pro-L is 5ms
-         ,2 // == 4 samples, blockdiagram
-// ,4 // == 16 samples, blockdiagram
+    // ,7 // == 128 samples, 2.666 ms at 48k
+         ,8 // 256 samples, 5.333 ms at 48k, the max lookahead of fabfilter pro-L is 5ms
+// ,2 // == 4 samples, blockdiagram
+         ,4 // == 16 samples, blockdiagram
   );
 
 totalReleaseLatency = maxReleaseTime-1;
