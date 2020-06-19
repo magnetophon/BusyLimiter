@@ -27,6 +27,7 @@ process(x) =
   testSignal@(totalLatency)
 , holdGR(testSignal)
 , preAttackGR(testSignal)@(1+totalLatency-(bottomAttackTime@totalLatency))
+, smoothGRl(testSignal)@(1+totalLatency-(maxAttackTime@totalLatency))
 ;
 ///////////////////////////////////////////////////////////////////////////////
 //                               implementation                              //
@@ -34,8 +35,53 @@ process(x) =
 preAttackGR(GR) = (GR:ba.slidingMin(bottomAttackTime,maxAttackTime));
 holdGR(GR) =
   (ba.slidingMin(holdTime,maxReleaseTime,GR)@(1+totalLatency-holdTime@(totalLatency-holdTime)))
-  :max(_:min(preAttackGR(GR@(1+totalLatency-(bottomAttackTime@(1+totalLatency-bottomAttackTime) )))))~_;
+  :max(_:min(GR@(totalLatency)))~_;
+// :max(_:min(preAttackGR(GR@(1+totalLatency-(bottomAttackTime@(1+totalLatency-bottomAttackTime) )))))~_;
+comp = hslider("comp", 0, 0, totalLatency, 1);
 
+smoothGRl(GR) = FB~_
+with {
+  FB(prev) =
+    par(i, maxAttackExpo, fade(i)):minN(maxAttackExpo)
+// fade(0)
+  with {
+  new(i) = lowestGRblock(GR,size(i))@(maxAttackTime-size(i));
+  newH(i) = new(i):ba.sAndH( reset(i)| (attPhase(prev)==0) );
+  prevH(i) = prev:ba.sAndH( reset(i)| (attPhase(prev)==0) );
+  reset(i) =
+    (newDownSpeed(i) > currentDownSpeed);
+  fade(i) =
+    crossfade(prevH(i),newH(i) ,ramp(size(i),reset(i)| (attPhase(prev)==0))) // TODO crossfade from current direction to new position
+// :min(GR@maxAttackTime)//brute force fade of 64 samples not needed for binary tree attack ?
+// sample and hold oldDownSpeed:
+// , (select2((newDownSpeed(i) > currentDownSpeed),currentDownSpeed ,newDownSpeed(i)))
+  ;
+  newDownSpeed(i) = (prev -new(i) )/size(i);
+  currentDownSpeed =  prev' - prev;
+  size(i) = pow(2,(maxAttackExpo-i));
+  }; // ^^ needs prev and oldDownSpeed
+  attPhase(prev) = lowestGRblock(GR,maxAttackTime)<prev;
+  lowestGRblock(GR,size) = GR:ba.slidingMin(size,maxAttackTime);
+
+
+  // ramp from 1/n to 1 in n samples.  (don't start at 0 cause when the ramp restarts, the crossfade should start right away)
+  // when reset == 1, go back to 0.
+  // ramp(n,reset) = select2(reset,_+(1/n):min(1),0)~_;
+  ramp(n,reset) = select2(reset,_+(1/n):min(1),1/n)~_;
+
+  crossfade(a,b,x) = it.interpolate_linear(x,a,b);  // faster then: a*(1-x) + b*x;
+
+  minN(n) = opWithNInputs(min,n);
+  maxN(n) = opWithNInputs(max,n);
+
+  opWithNInputs =
+    case {
+      (op,0) => 0:!;
+        (op,1) => _;
+      (op,2) => op;
+      (op,N) => (opWithNInputs(op,N-1),_) : op;
+    };
+};
 ///////////////////////////////////////////////////////////////////////////////
 //                                 constants                                 //
 ///////////////////////////////////////////////////////////////////////////////
@@ -47,8 +93,9 @@ totalAttackLatency = maxAttackTime-1;
 maxAttackTime = pow(2,maxAttackExpo);
 maxAttackExpo =
   select2(blockDiagram
-      // ,7 // == 128 samples, 2.666 ms at 48k
-         ,8 // 256 samples, 5.333 ms at 48k, the max lookahead of fabfilter pro-L is 5ms
+    // ,4 // == 16 samples,
+         ,7 // == 128 samples, 2.666 ms at 48k
+// ,8 // 256 samples, 5.333 ms at 48k, the max lookahead of fabfilter pro-L is 5ms
          ,2 // == 4 samples, blockdiagram
 // ,4 // == 16 samples, blockdiagram
   );
