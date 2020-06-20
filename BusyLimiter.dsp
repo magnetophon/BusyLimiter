@@ -42,7 +42,7 @@ needed steps:
 ///////////////////////////////////////////////////////////////////////////////
 
 process =
- test
+  test(testSignal)
 // , readIndex/totalTime
 // , (timeDiff:hbargraph("timeDiff", 0, maxClock)/maxClock)
 // testSignal@(totalLatency)
@@ -55,12 +55,14 @@ process =
 ///////////////////////////////////////////////////////////////////////////////
 test(GR) =
   (clock/maxClock)
+, GR@(totalTime -1 )
 , (FB(GR)~(_,_) :(_,!))
 with {
   // time, wrapped around maxClock
   clock = ((_+1)%maxClock)~_:_-1;
   FB(GR,prev,prevTarget) =
-    timeTable(readIndex) // TODO: make into acual fade
+    // timeTable(readIndex) // TODO: make into acual fade
+    fade
   , GRTable(readIndex)
   with {
     // save all the time values where a change of direction takes place
@@ -82,7 +84,7 @@ with {
 // if we get the same write-index twice, that means we need to stay the course, so don't write a new target, so index = totalTime+1
                                  <: select2(_==_',_,totalTime+1)
     ;
-    proposedSpeed = (GR-prev)/maxAttackTime;
+    proposedSpeed = (GR-prev)/totalTime;
     // proposedSpeed = speed(timeTable(readIndex),newTime,oldGR,newGR);
     currentSpeed = prev-prev';
 
@@ -103,7 +105,7 @@ with {
     // the time we have for the fade
     // if clock has wrapped around for newTime, but not yet for oldTime, add the wrap value
     // can not be more than totalLatency
-    // timeDiff(oldTime,newTime) = select2(oldTime<newTime, newTime-oldTime+maxClock, newTime-oldTime):min(totalLatency);
+    timeDiff(oldTime,newTime) = select2(oldTime<newTime, newTime-oldTime+maxClock, newTime-oldTime):min(totalLatency);
     // GRdiff(oldGR,newGR) = oldGR-newGR;
     // speed(oldTime,newTime,oldGR,newGR) = GRdiff/timeDiff;
     // TODO: actually implement:
@@ -113,6 +115,14 @@ with {
     // oldTime = clock:ba.sAndH(button("old"):ba.impulsify);
     // newTime = clock:ba.sAndH(button("new"):ba.impulsify);
 
+    fade =
+      crossfade(GRTable(readIndex),GRTable((readIndex-1)%totalTime) ,ramp(timeDiff(timeTable(readIndex),timeTable((readIndex-1)%totalTime)),trigRamp));
+    trigRamp = clock-totalTime == timeTable((readIndex-1)%totalTime);
+
+    ramp(n,reset) = select2(reset,_+(1/n):min(1),1/n)~_;
+    crossfade(a,b,x) =
+      it.interpolate_linear(x,a,b);  // faster then: a*(1-x) + b*x;
+    // a*(1-x) + b*x; // for readability
 
     // 3 possible values: down == -1, stationary == 0, up == 1
     direction = ((prev+proposedSpeed)>lowestGRblock(GR,totalTime))*-1 + ((prev+proposedSpeed)<lowestGRblock(GR,totalTime));
@@ -186,7 +196,8 @@ with {
 blockDiagram = 0;
 
 totalLatency = totalAttackLatency + totalReleaseLatency;
-totalTime = (maxAttackTime + maxReleaseTime):int;
+totalTime = pow(2,8):int;
+// totalTime = (maxAttackTime + maxReleaseTime):int;
 // slidingMin(4,4) looks at x@0,x@1,x@2 and x@3, so total latency is 3 samples
 totalAttackLatency = maxAttackTime-1;
 maxAttackTime = pow(2,maxAttackExpo);
