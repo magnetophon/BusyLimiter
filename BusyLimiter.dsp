@@ -17,15 +17,22 @@ first do the release, so attack knows where to start from
 
 new attack idea
 when there is a new lower value, check the value of time and sustract it from the previously saved one.
-if use that to calculate the needed speed, and if it is higher, save the time in a rw_table of size totalLatency.
+use that to calculate the needed speed, and if it is higher, save the time in a rw_table of size totalLatency.
 also save the needed GR in a second table
 
 when time==LatencyCompensatedSavedVlue, SandH the time and speed, read then next value and ramp to the needed GR in the alotted time.
 
 
-to combat time running into maxInt, make it a ramp.
+to combat time running into maxClock, make it a ramp.
 to make sure we don't get confused at the wrap-around point:
 if timeDiff<0 add wrapValue to one end.
+
+needed steps:
+- on startup, write the GR to index 1, write maxAttackTime to index 1
+- start fading from no gr to the GR at index 1
+- on the next sample, see if speed is smaller, write the GR and time to
+
+
 
 
 */
@@ -34,15 +41,95 @@ if timeDiff<0 add wrapValue to one end.
 //                                  process                                  //
 ///////////////////////////////////////////////////////////////////////////////
 
-process(x) =
-testSignal@(totalLatency)
-, holdGR(testSignal)
-, preAttackGR(testSignal)@(1+totalLatency-(bottomAttackTime@totalLatency))
-, smoothGRl(testSignal)@(1+totalLatency-(maxAttackTime@totalLatency))
+process =
+ test
+// , readIndex/totalTime
+// , (timeDiff:hbargraph("timeDiff", 0, maxClock)/maxClock)
+// testSignal@(totalLatency)
+// , holdGR(testSignal)
+// , preAttackGR(testSignal)@(1+totalLatency-(bottomAttackTime@totalLatency))
+// , smoothGRl(testSignal)@(1+totalLatency-(maxAttackTime@totalLatency))
 ;
 ///////////////////////////////////////////////////////////////////////////////
 //                               implementation                              //
 ///////////////////////////////////////////////////////////////////////////////
+test(GR) =
+  (clock/maxClock)
+, (FB(GR)~(_,_) :(_,!))
+with {
+  // time, wrapped around maxClock
+  clock = ((_+1)%maxClock)~_:_-1;
+  FB(GR,prev,prevTarget) =
+    timeTable(readIndex) // TODO: make into acual fade
+  , GRTable(readIndex)
+  with {
+    // save all the time values where a change of direction takes place
+    // TODO: remove  min, max, int
+    timeTable(readIndex) = rwtable(totalTime  +1, 0.0 , writeIndex:max(0):min(totalTime+1):int , clock , readIndex:max(0):min(totalTime+1):int);
+    GRTable(readIndex) = rwtable(totalTime  +1, 0.0 , writeIndex , GR , readIndex);
+    directionTable(readIndex) = rwtable(totalTime  +1, 0 , writeIndex , direction , readIndex);
+    // in case we need to fade down:
+    // - speed is negative, so speed<prevSpeed means we need to fade down faster than we are fading now, so we increase the write index
+    // in case we need to fade up:
+    // - speed is positive, so speed<prevSpeed means we need to fade up slower than we are fading now, so we increase the write index
+    // in case we need to stay put:
+    // - speed == prevSpeed so we don't increase the writeIndex
+    writeIndex =
+      // TODO: fix cornercase when we just arrived and need to go down, but less then we are doing down now.
+      select2((proposedSpeed<currentSpeed) | ( ((prev+currentSpeed)==prevTarget) & (GR!=prev))
+        // wrap around totalTime
+             ,_,(_+1)%totalTime)~(_<:_,_)
+// if we get the same write-index twice, that means we need to stay the course, so don't write a new target, so index = totalTime+1
+                                 <: select2(_==_',_,totalTime+1)
+    ;
+    proposedSpeed = (GR-prev)/maxAttackTime;
+    // proposedSpeed = speed(timeTable(readIndex),newTime,oldGR,newGR);
+    currentSpeed = prev-prev';
+
+    // oldGR = 0;
+    // newGR = 0;
+
+    // as soon as the clock is at the time of the new target, we have reached the target so we read the new one (or wait if we are alredy at the target)
+    readIndex =
+      select2(clock-totalTime == timeTable(_)
+             ,_
+// wrap around totalTime
+             ,(_+1)%totalTime
+      )~
+      (_<:si.bus(3));
+    // readIndex(0) is the current place
+    // readIndex(inc) = select2(_ > totalLatency, _+inc, 0 )~(_<:(_,_));
+    //
+    // the time we have for the fade
+    // if clock has wrapped around for newTime, but not yet for oldTime, add the wrap value
+    // can not be more than totalLatency
+    // timeDiff(oldTime,newTime) = select2(oldTime<newTime, newTime-oldTime+maxClock, newTime-oldTime):min(totalLatency);
+    // GRdiff(oldGR,newGR) = oldGR-newGR;
+    // speed(oldTime,newTime,oldGR,newGR) = GRdiff/timeDiff;
+    // TODO: actually implement:
+    // prevSpeed(oldTime,newTime,oldGR,newGR) = speed(oldTime,newTime,oldGR,newGR)';
+
+    // * `t`: hold trigger (0 for hold, 1 for bypass)
+    // oldTime = clock:ba.sAndH(button("old"):ba.impulsify);
+    // newTime = clock:ba.sAndH(button("new"):ba.impulsify);
+
+
+    // 3 possible values: down == -1, stationary == 0, up == 1
+    direction = ((prev+proposedSpeed)>lowestGRblock(GR,totalTime))*-1 + ((prev+proposedSpeed)<lowestGRblock(GR,totalTime));
+
+    linearLookahead = select3( direction+1
+                             , linearAttack
+                             , prev
+                             , linearRelease);
+
+    linearAttack = 0;
+  };
+};
+
+///////////////////////////////////////////////////////////////////////////////
+//                             old implementation                            //
+///////////////////////////////////////////////////////////////////////////////
+
 preAttackGR(GR) = (GR:ba.slidingMin(bottomAttackTime,maxAttackTime));
 holdGR(GR) =
   (ba.slidingMin(holdTime,maxReleaseTime,GR)@(1+totalLatency-holdTime@(totalLatency-holdTime)))
@@ -99,10 +186,13 @@ with {
 blockDiagram = 0;
 
 totalLatency = totalAttackLatency + totalReleaseLatency;
+totalTime = (maxAttackTime + maxReleaseTime):int;
 // slidingMin(4,4) looks at x@0,x@1,x@2 and x@3, so total latency is 3 samples
 totalAttackLatency = maxAttackTime-1;
 maxAttackTime = pow(2,maxAttackExpo);
-maxAttackExpo =
+maxAttackExpo = 8;
+// doesn't work with rwtable, TODO: try case?
+mAE =
   select2(blockDiagram
     // ,4 // == 16 samples,
     // ,7 // == 128 samples, 2.666 ms at 48k
@@ -113,12 +203,18 @@ maxAttackExpo =
 
 totalReleaseLatency = maxReleaseTime-1;
 maxReleaseTime = pow(2,maxReleaseExpo);
-maxReleaseExpo =
+maxReleaseExpo = 13;
+// doesn't work with rwtable, TODO: try case?
+mRE =
   select2(blockDiagram
          ,13 // == 8192 samples, 170.666 ms at 48k
          ,4 // == 16 for block diagram
 // ,6 // == 64 for block diagram
   );
+
+// not really the maximum int, but seems a safe bet and equates to more than 6 hours at 48k
+// maxClock = 2^30;
+maxClock = 2^17;
 ///////////////////////////////////////////////////////////////////////////////
 //                                    GUI                                    //
 ///////////////////////////////////////////////////////////////////////////////
