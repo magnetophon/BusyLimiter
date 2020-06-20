@@ -54,21 +54,25 @@ process =
 //                               implementation                              //
 ///////////////////////////////////////////////////////////////////////////////
 test(GR) =
-  (clock/maxClock)
-, GR@(totalTime -1 )
-, (FB(GR)~(_,_) :(_,!))
+  // (clock/maxClock)
+  GR@(totalTime -1 )
+, (FB(GR)~(_,_,!) )
+// , (FB(GR)~(_,_) :(_,!))
 with {
   // time, wrapped around maxClock
   clock = ((_+1)%maxClock)~_:_-1;
   FB(GR,prev,prevTarget) =
     // timeTable(readIndex) // TODO: make into acual fade
     fade
-  , GRTable(readIndex)
+, GRTable(readIndex)
+, GRTable((readIndex-2)%totalTime)
+// , trigRamp
   with {
     // save all the time values where a change of direction takes place
     // TODO: remove  min, max, int
     timeTable(readIndex) = rwtable(totalTime  +1, 0.0 , writeIndex:max(0):min(totalTime+1):int , clock , readIndex:max(0):min(totalTime+1):int);
     GRTable(readIndex) = rwtable(totalTime  +1, 0.0 , writeIndex , GR , readIndex);
+    // to know if we need a slow fade or a fast fade
     directionTable(readIndex) = rwtable(totalTime  +1, 0 , writeIndex , direction , readIndex);
     // in case we need to fade down:
     // - speed is negative, so speed<prevSpeed means we need to fade down faster than we are fading now, so we increase the write index
@@ -80,7 +84,9 @@ with {
       // TODO: fix cornercase when we just arrived and need to go down, but less then we are doing down now.
       select2((proposedSpeed<currentSpeed) | ( ((prev+currentSpeed)==prevTarget) & (GR!=prev))
         // wrap around totalTime
-             ,_,(_+1)%totalTime)~(_<:_,_)
+             ,(_+(1:ba.impulsify*2))
+             ,(_+1)%totalTime
+      )~(_<:_,_)
 // if we get the same write-index twice, that means we need to stay the course, so don't write a new target, so index = totalTime+1
                                  <: select2(_==_',_,totalTime+1)
     ;
@@ -116,8 +122,8 @@ with {
     // newTime = clock:ba.sAndH(button("new"):ba.impulsify);
 
     fade =
-      crossfade(GRTable(readIndex),GRTable((readIndex-1)%totalTime) ,ramp(timeDiff(timeTable(readIndex),timeTable((readIndex-1)%totalTime)),trigRamp));
-    trigRamp = clock-totalTime == timeTable((readIndex-1)%totalTime);
+      crossfade(GRTable((readIndex-2)%totalTime),GRTable((readIndex-1)%totalTime) ,ramp(timeDiff(timeTable((readIndex-1)%totalTime), timeTable((readIndex-2)%totalTime)),trigRamp));
+    trigRamp = clock-totalTime == timeTable((readIndex-1)%totalTime) | (1:ba.impulsify);
 
     ramp(n,reset) = select2(reset,_+(1/n):min(1),1/n)~_;
     crossfade(a,b,x) =
