@@ -64,13 +64,19 @@ with {
   FB(GR,prev,prevTarget) =
     // timeTable(readIndex) // TODO: make into acual fade
     fade
-, GRTable(readIndex)
-, GRTable((readIndex-2)%totalTime)
+  , GRi(0)
+  , ramp(totalTime,button("reset"))
+// , GRi(-1)
+// , (timeDiff(timeTable((readIndex-1+comp)%totalTime), timeTable((readIndex-0+comp)%totalTime))/totalTime)
+// , ramp(timeDiff(timeTable((readIndex-1+comp)%totalTime), timeTable((readIndex-0+comp)%totalTime)),trigRamp)
+// , (clock/maxClock)
+// , GRTable((readIndex-2)%totalTime)
 // , trigRamp
   with {
     // save all the time values where a change of direction takes place
     // TODO: remove  min, max, int
     timeTable(readIndex) = rwtable(totalTime  +1, 0.0 , writeIndex:max(0):min(totalTime+1):int , clock , readIndex:max(0):min(totalTime+1):int);
+    // timeTable(readIndex) = clock+totalTime,(readIndex:!),(writeIndex:!);//rwtable(totalTime  +1, 0.0 , writeIndex:max(0):min(totalTime+1):int , clock , readIndex:max(0):min(totalTime+1):int);
     GRTable(readIndex) = rwtable(totalTime  +1, 0.0 , writeIndex , GR , readIndex);
     // to know if we need a slow fade or a fast fade
     directionTable(readIndex) = rwtable(totalTime  +1, 0 , writeIndex , direction , readIndex);
@@ -81,14 +87,20 @@ with {
     // in case we need to stay put:
     // - speed == prevSpeed so we don't increase the writeIndex
     writeIndex =
+      // select2((proposedSpeed<currentSpeed)
       // TODO: fix cornercase when we just arrived and need to go down, but less then we are doing down now.
       select2((proposedSpeed<currentSpeed) | ( ((prev+currentSpeed)==prevTarget) & (GR!=prev))
-        // wrap around totalTime
-             ,(_+(1:ba.impulsify*2))
+        // keep the index what is was
+             ,(_
+               // init at 20
+               // +(1:ba.impulsify*20)
+             )
+// increase the writeIndex and wrap around totalTime
              ,(_+1)%totalTime
       )~(_<:_,_)
-// if we get the same write-index twice, that means we need to stay the course, so don't write a new target, so index = totalTime+1
-                                 <: select2(_==_',_,totalTime+1)
+// if we get the same write-index twice, that means we need to stay the course
+// , so don't write a new target, so index = totalTime+1
+        <: select2(_==_',_,totalTime+1)
     ;
     proposedSpeed = (GR-prev)/totalTime;
     // proposedSpeed = speed(timeTable(readIndex),newTime,oldGR,newGR);
@@ -99,7 +111,7 @@ with {
 
     // as soon as the clock is at the time of the new target, we have reached the target so we read the new one (or wait if we are alredy at the target)
     readIndex =
-      select2(clock-totalTime == timeTable(_)
+      select2((clock-totalTime) == timeTable(_)
              ,_
 // wrap around totalTime
              ,(_+1)%totalTime
@@ -110,8 +122,8 @@ with {
     //
     // the time we have for the fade
     // if clock has wrapped around for newTime, but not yet for oldTime, add the wrap value
-    // can not be more than totalLatency
-    timeDiff(oldTime,newTime) = select2(oldTime<newTime, newTime-oldTime+maxClock, newTime-oldTime):min(totalLatency);
+    // can not be more than totalTime
+    timeDiff(oldTime,newTime) = select2(oldTime<newTime, newTime-oldTime+maxClock, newTime-oldTime):min(totalTime);
     // GRdiff(oldGR,newGR) = oldGR-newGR;
     // speed(oldTime,newTime,oldGR,newGR) = GRdiff/timeDiff;
     // TODO: actually implement:
@@ -122,8 +134,14 @@ with {
     // newTime = clock:ba.sAndH(button("new"):ba.impulsify);
 
     fade =
-      crossfade(GRTable((readIndex-2)%totalTime),GRTable((readIndex-1)%totalTime) ,ramp(timeDiff(timeTable((readIndex-1)%totalTime), timeTable((readIndex-2)%totalTime)),trigRamp));
-    trigRamp = clock-totalTime == timeTable((readIndex-1)%totalTime) | (1:ba.impulsify);
+      crossfade(GRi(-1),GRi(0) ,ramp(timeDiff(timeI(-1), timeI(0)),trigRamp));
+    GRi(i) = GRTable(readIndexI(i));
+    timeI(i) = timeTable(readIndexI(i));
+    trigRamp = clock-totalTime == timeTable(readIndexI(-1)) | (1:ba.impulsify);
+    // trigRamp = clock-totalTime == timeTable(readIndexI(-1+(releasing))) | (1:ba.impulsify);
+    readIndexI(i) = (readIndex+i+comp)%totalTime;
+    comp = hslider("comp", 0, -5, 5, 1):int;
+    // releasing = GRi(-1)<GRi(0);
 
     ramp(n,reset) = select2(reset,_+(1/n):min(1),1/n)~_;
     crossfade(a,b,x) =
@@ -131,127 +149,129 @@ with {
     // a*(1-x) + b*x; // for readability
 
     // 3 possible values: down == -1, stationary == 0, up == 1
-    direction = ((prev+proposedSpeed)>lowestGRblock(GR,totalTime))*-1 + ((prev+proposedSpeed)<lowestGRblock(GR,totalTime));
+    // direction = ((prev+proposedSpeed)>lowestGRblock(GR,totalTime))*-1 + ((prev+proposedSpeed)<lowestGRblock(GR,totalTime));
 
-    linearLookahead = select3( direction+1
-                             , linearAttack
-                             , prev
-                             , linearRelease);
+    // linearLookahead = select3( direction+1
+    // , linearAttack
+    // , prev
+    // , linearRelease);
 
-    linearAttack = 0;
   };
+
+  linearAttack = 0;
 };
 
-///////////////////////////////////////////////////////////////////////////////
-//                             old implementation                            //
-///////////////////////////////////////////////////////////////////////////////
+  ///////////////////////////////////////////////////////////////////////////////
+  //                             old implementation                            //
+  ///////////////////////////////////////////////////////////////////////////////
 
-preAttackGR(GR) = (GR:ba.slidingMin(bottomAttackTime,maxAttackTime));
-holdGR(GR) =
-  (ba.slidingMin(holdTime,maxReleaseTime,GR)@(1+totalLatency-holdTime@(totalLatency-holdTime)))
-  :max(_:min(GR@(totalLatency)))~_;
-// :max(_:min(preAttackGR(GR@(1+totalLatency-(bottomAttackTime@(1+totalLatency-bottomAttackTime) )))))~_;
-comp = hslider("comp", 0, 0, totalLatency, 1);
+  preAttackGR(GR) = (GR:ba.slidingMin(bottomAttackTime,maxAttackTime));
+  holdGR(GR) =
+    (ba.slidingMin(holdTime,maxReleaseTime,GR)@(1+totalLatency-holdTime@(totalLatency-holdTime)))
+    :max(_:min(GR@(totalLatency)))~_;
+  // :max(_:min(preAttackGR(GR@(1+totalLatency-(bottomAttackTime@(1+totalLatency-bottomAttackTime) )))))~_;
+  comp = hslider("comp", 0, 0, totalLatency, 1);
 
-smoothGRl(GR) = FB~_
-with {
-  FB(prev) =
-    par(i, maxAttackExpo, fade(i)):minN(maxAttackExpo)
-// fade(0)
+  smoothGRl(GR) = FB~_
   with {
-  new(i) = lowestGRblock(GR,size(i))@(maxAttackTime-size(i));
-  newH(i) = new(i):ba.sAndH( reset(i)| select2(checkbox("att newH"),0,(attPhase(prev)==0)) );
-  prevH(i) = prev:ba.sAndH( reset(i)| select2(checkbox("att prevH"),0,(attPhase(prev)==0)) );
-  reset(i) =
-    (newDownSpeed(i) > currentDownSpeed);
-  fade(i) =
-    crossfade(prevH(i),newH(i) ,ramp(size(i),reset(i)| select2(checkbox("att ramp"),0,(attPhase(prev)==0)))) // TODO crossfade from current direction to new position
+    FB(prev) =
+      par(i, maxAttackExpo, fade(i)):minN(maxAttackExpo)
+// fade(0)
+    with {
+    new(i) = lowestGRblock(GR,size(i))@(maxAttackTime-size(i));
+    newH(i) = new(i):ba.sAndH( reset(i)| select2(checkbox("att newH"),0,(attPhase(prev)==0)) );
+    prevH(i) = prev:ba.sAndH( reset(i)| select2(checkbox("att prevH"),0,(attPhase(prev)==0)) );
+    reset(i) =
+      (newDownSpeed(i) > currentDownSpeed);
+    fade(i) =
+      crossfade(prevH(i),newH(i) ,ramp(size(i),reset(i)| select2(checkbox("att ramp"),0,(attPhase(prev)==0)))) // TODO crossfade from current direction to new position
 // :min(GR@maxAttackTime)//brute force fade of 64 samples not needed for binary tree attack ?
 // sample and hold oldDownSpeed:
 // , (select2((newDownSpeed(i) > currentDownSpeed),currentDownSpeed ,newDownSpeed(i)))
-  ;
-  newDownSpeed(i) = (prev -new(i) )/size(i);
-  currentDownSpeed =  prev' - prev;
-  size(i) = pow(2,(maxAttackExpo-i));
-  }; // ^^ needs prev and oldDownSpeed
-  attPhase(prev) = lowestGRblock(GR,maxAttackTime)<prev;
-  lowestGRblock(GR,size) = GR:ba.slidingMin(size,maxAttackTime);
+    ;
+    newDownSpeed(i) = (prev -new(i) )/size(i);
+    currentDownSpeed =  prev' - prev;
+    size(i) = pow(2,(maxAttackExpo-i));
+    }; // ^^ needs prev and oldDownSpeed
+    attPhase(prev) = lowestGRblock(GR,maxAttackTime)<prev;
+    lowestGRblock(GR,size) = GR:ba.slidingMin(size,maxAttackTime);
 
 
-  // ramp from 1/n to 1 in n samples.  (don't start at 0 cause when the ramp restarts, the crossfade should start right away)
-  // when reset == 1, go back to 0.
-  // ramp(n,reset) = select2(reset,_+(1/n):min(1),0)~_;
-  ramp(n,reset) = select2(reset,_+(1/n):min(1),1/n)~_;
+    // ramp from 1/n to 1 in n samples.  (don't start at 0 cause when the ramp restarts, the crossfade should start right away)
+    // when reset == 1, go back to 0.
+    // ramp(n,reset) = select2(reset,_+(1/n):min(1),0)~_;
+    ramp(n,reset) = select2(reset,_+(1/n):min(1),1/n)~_;
 
-  crossfade(a,b,x) = it.interpolate_linear(x,a,b);  // faster then: a*(1-x) + b*x;
+    crossfade(a,b,x) = it.interpolate_linear(x,a,b);  // faster then: a*(1-x) + b*x;
 
-  minN(n) = opWithNInputs(min,n);
-  maxN(n) = opWithNInputs(max,n);
+    minN(n) = opWithNInputs(min,n);
+    maxN(n) = opWithNInputs(max,n);
 
-  opWithNInputs =
-    case {
-      (op,0) => 0:!;
-        (op,1) => _;
-      (op,2) => op;
-      (op,N) => (opWithNInputs(op,N-1),_) : op;
-    };
-};
-///////////////////////////////////////////////////////////////////////////////
-//                                 constants                                 //
-///////////////////////////////////////////////////////////////////////////////
-blockDiagram = 0;
+    opWithNInputs =
+      case {
+        (op,0) => 0:!;
+            (op,1) => _;
+        (op,2) => op;
+        (op,N) => (opWithNInputs(op,N-1),_) : op;
+      };
+  };
+  ///////////////////////////////////////////////////////////////////////////////
+  //                                 constants                                 //
+  ///////////////////////////////////////////////////////////////////////////////
+  blockDiagram = 0;
 
-totalLatency = totalAttackLatency + totalReleaseLatency;
-totalTime = pow(2,8):int;
-// totalTime = (maxAttackTime + maxReleaseTime):int;
-// slidingMin(4,4) looks at x@0,x@1,x@2 and x@3, so total latency is 3 samples
-totalAttackLatency = maxAttackTime-1;
-maxAttackTime = pow(2,maxAttackExpo);
-maxAttackExpo = 8;
-// doesn't work with rwtable, TODO: try case?
-mAE =
-  select2(blockDiagram
-    // ,4 // == 16 samples,
-    // ,7 // == 128 samples, 2.666 ms at 48k
-         ,8 // 256 samples, 5.333 ms at 48k, the max lookahead of fabfilter pro-L is 5ms
+  totalLatency = totalTime-2;
+  // totalLatency = totalAttackLatency + totalReleaseLatency;
+  totalTime = pow(2,10):int;
+  // totalTime = (maxAttackTime + maxReleaseTime):int;
+  // slidingMin(4,4) looks at x@0,x@1,x@2 and x@3, so total latency is 3 samples
+  totalAttackLatency = maxAttackTime-1;
+  maxAttackTime = pow(2,maxAttackExpo);
+  maxAttackExpo = 8;
+  // doesn't work with rwtable, TODO: try case?
+  mAE =
+    select2(blockDiagram
+        // ,4 // == 16 samples,
+        // ,7 // == 128 samples, 2.666 ms at 48k
+           ,8 // 256 samples, 5.333 ms at 48k, the max lookahead of fabfilter pro-L is 5ms
 // ,2 // == 4 samples, blockdiagram
-         ,4 // == 16 samples, blockdiagram
-  );
+           ,4 // == 16 samples, blockdiagram
+    );
 
-totalReleaseLatency = maxReleaseTime-1;
-maxReleaseTime = pow(2,maxReleaseExpo);
-maxReleaseExpo = 13;
-// doesn't work with rwtable, TODO: try case?
-mRE =
-  select2(blockDiagram
-         ,13 // == 8192 samples, 170.666 ms at 48k
-         ,4 // == 16 for block diagram
+  totalReleaseLatency = maxReleaseTime-1;
+  maxReleaseTime = pow(2,maxReleaseExpo);
+  maxReleaseExpo = 13;
+  // doesn't work with rwtable, TODO: try case?
+  mRE =
+    select2(blockDiagram
+           ,13 // == 8192 samples, 170.666 ms at 48k
+           ,4 // == 16 for block diagram
 // ,6 // == 64 for block diagram
-  );
+    );
 
-// not really the maximum int, but seems a safe bet and equates to more than 6 hours at 48k
-// maxClock = 2^30;
-maxClock = 2^17;
-///////////////////////////////////////////////////////////////////////////////
-//                                    GUI                                    //
-///////////////////////////////////////////////////////////////////////////////
+  // not really the maximum int, but seems a safe bet and equates to more than 6 hours at 48k
+  maxClock = 2^30;
+  // maxClock = 2^17;
+  ///////////////////////////////////////////////////////////////////////////////
+  //                                    GUI                                    //
+  ///////////////////////////////////////////////////////////////////////////////
 
-topAttackTime = hslider("topAttackTime", 3/4*maxAttackTime, 1, maxAttackTime, 1);
-bottomAttackTime = hslider("bottomAttackTime", 1/4*maxAttackTime, 1, maxAttackTime, 1);
-topReleaseTime = hslider("topReleaseTime", 3/4*maxReleaseTime, 1, maxReleaseTime, 1);
-bottomReleaseTime = hslider("bottomReleaseTime", 1/4*maxReleaseTime, 1, maxReleaseTime, 1);
-holdTime = hslider("holdTime", 1/4*maxReleaseTime, 1, maxReleaseTime, 1);
+  topAttackTime = hslider("topAttackTime", 3/4*maxAttackTime, 1, maxAttackTime, 1);
+  bottomAttackTime = hslider("bottomAttackTime", 1/4*maxAttackTime, 1, maxAttackTime, 1);
+  topReleaseTime = hslider("topReleaseTime", 3/4*maxReleaseTime, 1, maxReleaseTime, 1);
+  bottomReleaseTime = hslider("bottomReleaseTime", 1/4*maxReleaseTime, 1, maxReleaseTime, 1);
+  holdTime = hslider("holdTime", 1/4*maxReleaseTime, 1, maxReleaseTime, 1);
 
 
-blockRate = hslider("[0]block rate", 0.1, 0, 1, 0.001);
-noiseLevel = hslider("[1]noise level", 0, 0, 1, 0.01);
-noiseRate = hslider("[2]noise rate", 20, 10, 20000, 10);
+  blockRate = hslider("[0]block rate", 0.001, 0, 1, 0.001)/10;
+  noiseLevel = hslider("[1]noise level", 0, 0, 1, 0.01);
+  noiseRate = hslider("[2]noise rate", 20, 10, 20000, 10);
 
-///////////////////////////////////////////////////////////////////////////////
-//                              helper functions                             //
-///////////////////////////////////////////////////////////////////////////////
+  ///////////////////////////////////////////////////////////////////////////////
+  //                              helper functions                             //
+  ///////////////////////////////////////////////////////////////////////////////
 
-testSignal =
-  vgroup("testSignal",
-         no.lfnoise0(totalLatency * 8 * blockRate * (no.lfnoise0(totalLatency/2):max(0.1) ))
-         :pow(3)*(1-noiseLevel) +(no.lfnoise(noiseRate):pow(3) *noiseLevel):min(0)) ;
+  testSignal =
+    vgroup("testSignal",
+           no.lfnoise0(totalLatency * blockRate * (1+((no.lfnoise(totalLatency*blockRate):pow(8):abs)*totalLatency*hslider("blockVar", 0, 0, 1, 0.001)) ))
+           :pow(3)*(1-noiseLevel) +(no.lfnoise(noiseRate):pow(3) *noiseLevel):min(0)) ;
