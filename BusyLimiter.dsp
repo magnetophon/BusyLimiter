@@ -35,6 +35,9 @@ needed steps:
 
 
 
+
+cubic bezier, solved for t
+https://www.wolframalpha.com/input/?i=solve+x%3D%281-t%29%5E3a%2B3%281-t%29%5E2tb%2B3%281-t%29t%5E2c%2Bt%5E3d+for+t
 */
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -65,13 +68,12 @@ with {
     // timeTable(readIndex) // TODO: make into acual fade
     fade
   , GRi(0)
-  , ramp(totalTime,button("reset"))
 // , GRi(-1)
 // , (timeDiff(timeTable((readIndex-1+comp)%totalTime), timeTable((readIndex-0+comp)%totalTime))/totalTime)
 // , ramp(timeDiff(timeTable((readIndex-1+comp)%totalTime), timeTable((readIndex-0+comp)%totalTime)),trigRamp)
 // , (clock/maxClock)
 // , GRTable((readIndex-2)%totalTime)
-// , trigRamp
+, trigRamp
   with {
     // save all the time values where a change of direction takes place
     // TODO: remove  min, max, int
@@ -81,14 +83,14 @@ with {
     // to know if we need a slow fade or a fast fade
     directionTable(readIndex) = rwtable(totalTime  +1, 0 , writeIndex , direction , readIndex);
     // in case we need to fade down:
-    // - speed is negative, so speed<prevSpeed means we need to fade down faster than we are fading now, so we increase the write index
+    // - proposedSpeed is negative, so proposedSpeed<currentSpeed means we need to fade down faster than we are fading now, so we increase the write index
     // in case we need to fade up:
-    // - speed is positive, so speed<prevSpeed means we need to fade up slower than we are fading now, so we increase the write index
+    // - proposedSpeed is positive, so proposedSpeed<currentSpeed means we need to fade up slower than we are fading now, so we increase the write index
     // in case we need to stay put:
-    // - speed == prevSpeed so we don't increase the writeIndex
+    // - proposedSpeed == currentSpeed so we don't increase the writeIndex
     writeIndex =
       // select2((proposedSpeed<currentSpeed)
-      // TODO: fix cornercase when we just arrived and need to go down, but less then we are doing down now.
+      // fix cornercase when we just arrived and need to go down, but less then we are doing down now.
       select2((proposedSpeed<currentSpeed) | ( ((prev+currentSpeed)==prevTarget) & (GR!=prev))
         // keep the index what is was
              ,(_
@@ -103,13 +105,9 @@ with {
         <: select2(_==_',_,totalTime+1)
     ;
     proposedSpeed = (GR-prev)/totalTime;
-    // proposedSpeed = speed(timeTable(readIndex),newTime,oldGR,newGR);
     currentSpeed = prev-prev';
-
-    // oldGR = 0;
-    // newGR = 0;
-
-    // as soon as the clock is at the time of the new target, we have reached the target so we read the new one (or wait if we are alredy at the target)
+    // as soon as the clock is at the time of the new target, we have reached the target so we read the new one
+    // (or wait if we are alredy at the target)
     readIndex =
       select2((clock-totalTime) == timeTable(_)
              ,_
@@ -117,27 +115,16 @@ with {
              ,(_+1)%totalTime
       )~
       (_<:si.bus(3));
-    // readIndex(0) is the current place
-    // readIndex(inc) = select2(_ > totalLatency, _+inc, 0 )~(_<:(_,_));
-    //
     // the time we have for the fade
     // if clock has wrapped around for newTime, but not yet for oldTime, add the wrap value
     // can not be more than totalTime
     timeDiff(oldTime,newTime) = select2(oldTime<newTime, newTime-oldTime+maxClock, newTime-oldTime):min(totalTime);
-    // GRdiff(oldGR,newGR) = oldGR-newGR;
-    // speed(oldTime,newTime,oldGR,newGR) = GRdiff/timeDiff;
-    // TODO: actually implement:
-    // prevSpeed(oldTime,newTime,oldGR,newGR) = speed(oldTime,newTime,oldGR,newGR)';
-
-    // * `t`: hold trigger (0 for hold, 1 for bypass)
-    // oldTime = clock:ba.sAndH(button("old"):ba.impulsify);
-    // newTime = clock:ba.sAndH(button("new"):ba.impulsify);
 
     fade =
       crossfade(GRi(-1),GRi(0) ,ramp(timeDiff(timeI(-1), timeI(0)),trigRamp));
     GRi(i) = GRTable(readIndexI(i));
     timeI(i) = timeTable(readIndexI(i));
-    trigRamp = clock-totalTime == timeTable(readIndexI(-1)) | (1:ba.impulsify);
+    trigRamp = clock-totalTime == timeI(-1) | (1:ba.impulsify);
     // trigRamp = clock-totalTime == timeTable(readIndexI(-1+(releasing))) | (1:ba.impulsify);
     readIndexI(i) = (readIndex+i+comp)%totalTime;
     comp = hslider("comp", 0, -5, 5, 1):int;
